@@ -7,9 +7,18 @@ def normalize_name(name_str):
     """
     Normalizes the contact name so the first letter of each word is capitalized.
     Handles hyphens and apostrophes (e.g., "d'andrea" -> "D'Andrea").
+    If name is empty or an email address, returns "Unknown".
     """
-    if not name_str:
-        return ""
+    if not name_str or not name_str.strip():
+        return "Unknown"
+    
+    name_str = name_str.strip()
+    
+    # Check if the name is an email address
+    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    if re.match(email_pattern, name_str):
+        return "Unknown"
+    
     return name_str.title()
 
 def clean_email(email_str):

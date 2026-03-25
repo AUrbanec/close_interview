@@ -2,6 +2,8 @@ import csv
 import time
 import argparse
 import statistics
+import os
+from dotenv import load_dotenv
 from close_api import CloseAPI
 from data_cleaner import (
     normalize_name, clean_email, clean_phone, 
@@ -9,18 +11,28 @@ from data_cleaner import (
 )
 
 def main():
+    load_dotenv()
     parser = argparse.ArgumentParser(description="Close API Take-Home Project")
-    parser.add_argument("--api-key", required=True, help="Your Close API Key")
-    parser.add_argument("--file", required=True, help="Path to the MOCK_DATA.csv file")
-    parser.add_argument("--start-date", required=True, help="Start date for filtering (YYYY-MM-DD)")
-    parser.add_argument("--end-date", required=True, help="End date for filtering (YYYY-MM-DD)")
-    parser.add_argument("--output", default="state_segments.csv", help="Output CSV filename")
+    parser.add_argument("--api-key", default=os.getenv("API_KEY"), help="Your Close API Key")
+    parser.add_argument("--file", default=os.getenv("FILE"), help="Path to the MOCK_DATA.csv file")
+    parser.add_argument("--start-date", default=os.getenv("START_DATE"), help="Start date for filtering (YYYY-MM-DD)")
+    parser.add_argument("--end-date", default=os.getenv("END_DATE"), help="End date for filtering (YYYY-MM-DD)")
+    parser.add_argument("--output", default=os.getenv("OUTPUT", "state_segments.csv"), help="Output CSV filename")
+    
     args = parser.parse_args()
+    
+    if not args.api_key:
+        parser.error("--api-key is required (set via .env API_KEY or command line)")
+    if not args.file:
+        parser.error("--file is required (set via .env FILE or command line)")
+    if not args.start_date:
+        parser.error("--start-date is required (set via .env START_DATE or command line)")
+    if not args.end_date:
+        parser.error("--end-date is required (set via .env END_DATE or command line)")
 
     api = CloseAPI(args.api_key)
 
     print("1. Setting up Custom Fields in Close...")
-    # This correctly fetches the cf_xxxx IDs
     founded_cf_id = api.get_or_create_custom_field("Company Founded", "date")
     revenue_cf_id = api.get_or_create_custom_field("Company Revenue", "number")
 
@@ -40,7 +52,7 @@ def main():
                     "contacts":[],
                     "founded": parse_date(row.get('custom.Company Founded')),
                     "revenue": parse_revenue(row.get('custom.Company Revenue')),
-                    "state": row.get('Company US State', '').strip()
+                    "state": row.get('Company US State', '').strip() or "Unknown"
                 }
             
             contact_name = normalize_name(row.get('Contact Name', '').strip())
@@ -48,7 +60,8 @@ def main():
             phone = clean_phone(row.get('Contact Phones', ''))
             
             contact_obj = {}
-            if contact_name: contact_obj["name"] = contact_name
+            if contact_name and contact_name != "Unknown": 
+                contact_obj["name"] = contact_name
             if email: contact_obj["emails"] = [{"email": email}]
             if phone: contact_obj["phones"] = [{"phone": phone}]
             
@@ -68,9 +81,12 @@ def main():
                 update_payload[f"custom.{founded_cf_id}"] = lead_data["founded"]
             if lead_data["revenue"] is not None:
                 update_payload[f"custom.{revenue_cf_id}"] = lead_data["revenue"]
-            if lead_data["state"]:
+                
+            # FIX: Only push the address to Close if it's a real state
+            if lead_data["state"] and lead_data["state"] != "Unknown":
                 update_payload["addresses"] =[{"state": lead_data["state"], "country": "US"}]
                 
+            # Only send the PUT request if there are actually fields to update
             if update_payload:
                 api.update_lead(lead_id, update_payload)
             
@@ -95,7 +111,6 @@ def main():
                 if not is_duplicate:
                     new_contact["lead_id"] = lead_id
                     api.create_contact(new_contact)
-                    # Add to sets so we don't duplicate within the same CSV run
                     if contact_email: existing_emails.add(contact_email)
                     if contact_name: existing_names.add(contact_name)
                     
@@ -109,7 +124,9 @@ def main():
                 payload[f"custom.{founded_cf_id}"] = lead_data["founded"]
             if lead_data["revenue"] is not None:
                 payload[f"custom.{revenue_cf_id}"] = lead_data["revenue"]
-            if lead_data["state"]:
+                
+            # FIX: Only push the address to Close if it's a real state
+            if lead_data["state"] and lead_data["state"] != "Unknown":
                 payload["addresses"] = [{"state": lead_data["state"], "country": "US"}]
                 
             api.create_lead(payload)
@@ -118,7 +135,6 @@ def main():
     time.sleep(10)
 
     print(f"5. Fetching leads founded between {args.start_date} and {args.end_date}...")
-    # FIX: Pass the dynamically fetched custom field ID instead of the string "Company Founded"
     filtered_leads = api.search_leads_by_date(args.start_date, args.end_date, founded_cf_id)
     print(f"   Found {len(filtered_leads)} leads matching the date range.")
 
@@ -164,6 +180,9 @@ def main():
         
         for state, stats in state_metrics.items():
             total_rev = sum(stats["revenues"])
+            if total_rev <= 0:
+                continue  # Skip states with no revenue
+                
             median_rev = statistics.median(stats["revenues"]) if stats["revenues"] else 0
             
             writer.writerow([
