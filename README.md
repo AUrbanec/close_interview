@@ -10,12 +10,16 @@ To clean the data, data_cleaner.py is called to do things like:
 - Checks for existing leads and contacts before creating or updating the new contact information
 - Pulls the leads with a company founded in the specified time frame 
 
+To identify data which was invalid, I used a combination of manual review (to identify the types/patterns of issues I need to address), 3rd party python libraries, and regex. 
+
 ## Setup
 I didn't want to re-number everything, but use a .venv to install by 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 ```
+or don't 
+
 1. Install dependencies:
 ```bash
 pip install -r requirements.txt
